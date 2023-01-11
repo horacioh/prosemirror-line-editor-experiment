@@ -1,22 +1,25 @@
-import { baseKeymap, toggleMark } from "prosemirror-commands";
-import { dropCursor } from "prosemirror-dropcursor";
-import { history, redo, undo } from "prosemirror-history";
-import { keymap } from "prosemirror-keymap";
-import { Schema } from "prosemirror-model";
-import { EditorState } from "prosemirror-state";
-import { EditorView, NodeViewConstructor } from "prosemirror-view";
+import {$createMintterBlock, MintterBlock} from './MintterBlock';
+import {baseKeymap, toggleMark} from "prosemirror-commands";
+import {dropCursor} from "prosemirror-dropcursor";
+import {history, redo, undo} from "prosemirror-history";
+import {keymap} from "prosemirror-keymap";
+import {Schema} from "prosemirror-model";
+import {EditorState} from "prosemirror-state";
+import type {EditorView, NodeViewConstructor} from "prosemirror-view";
+import {createEditor, DecoratorNode, NodeKey, LexicalNode, INDENT_CONTENT_COMMAND, OUTDENT_CONTENT_COMMAND, COMMAND_PRIORITY_EDITOR, $getRoot, $getNodeByKey} from 'lexical';
 
 import moment from "moment";
 
-import { dev, z } from "@autoplay/utils";
+import {dev, z} from "@autoplay/utils";
 import createLibraryLoggerProvider from "librarylog";
-import { schema as basicSchema } from "prosemirror-schema-basic";
-import { Subscription } from "rxjs";
+import {schema as basicSchema} from "prosemirror-schema-basic";
+import {Subscription} from "rxjs";
 import xss from "xss";
-import { defineItemSchema } from "./defineItemSchema";
-import { defineMimeType } from "./MimeType";
-import { buildTypedNodeSpec } from "./prosemirrorBuildNodeSpec";
-import { textHTML } from "./textHTML.mimeType";
+import {defineItemSchema} from "./defineItemSchema";
+import {defineMimeType} from "./MimeType";
+import {buildTypedNodeSpec} from "./prosemirrorBuildNodeSpec";
+import {textHTML} from "./textHTML.mimeType";
+import {mergeRegister} from "@lexical/utils";
 
 const blockSpec = buildTypedNodeSpec("block", {
   atom: true,
@@ -41,7 +44,7 @@ const blockSpec = buildTypedNodeSpec("block", {
     },
   },
 })
-  .toDOM((node) => ["mintty-block", { "mintter-id": node.attrs.miid }])
+  .toDOM((node) => ["mintty-block", {"mintter-id": node.attrs.miid}])
   // // Used for identifying pasting (this is not so important as we should manually manage pasting in Mintter
   // // using unified -> https://github.com/unifiedjs/unified)
   // .addParser({
@@ -57,7 +60,7 @@ const schema = new Schema({
     doc: {
       content: "block*",
       // group: "block",
-      parseDOM: [{ tag: "p" }],
+      parseDOM: [{tag: "p"}],
     },
     block: blockSpec.nodeSpec,
     // :: NodeSpec The text node.
@@ -91,13 +94,13 @@ const naturalNumberFormat = defineMimeType("number/natural", {
 
 const itemIDFormat = defineMimeType(
   "mintter/item-id",
-  z.string({ description: "Mintter Item ID" }).min(6)
+  z.string({description: "Mintter Item ID"}).min(6)
 );
 
 // Uhhh... Like a pub key attached to an authorized identity
 const agentIdentityFormat = defineMimeType(
   "mintter/signer",
-  z.string({ description: "Mintter Signing Identity" }).min(6)
+  z.string({description: "Mintter Signing Identity"}).min(6)
 );
 
 const unixSecsFormat = defineMimeType("time/unix-secs", {
@@ -188,7 +191,7 @@ const blockNodeView: (
     console.error("missing slot info?", found);
     dom.textContent = dev`missing slot info? ${attrs}`.toDisplay();
     dom.style.whiteSpace = "pre";
-    return { dom };
+    return {dom};
   }
 
   if (!found.mount) debugger;
@@ -235,7 +238,7 @@ function trashHTML(input: string): HTMLElement {
 }
 
 export const ProseMirrorBlockContainerHTML = PageWithTitle.forHTML(
-  ({ slots, values }) => {
+  ({slots, values}) => {
     slots.comments.map((child) => child.html);
     return {
       css: `
@@ -252,15 +255,14 @@ export const ProseMirrorBlockContainerHTML = PageWithTitle.forHTML(
 <div class="page-title">${xss(values.title["text/html"])}</div>
 <div class="page-content">
   ${slots.children
-    .map(
-      (a) =>
-        `
-<div class="page-block" style="margin-left: ${
-          a.standoffValues.indentation["number/natural"] + "rem"
-        }" data-miid="${xss(
-          /* hmm not an attr escape... */
-          a.miid
-        )}">
+        .map(
+          (a) =>
+              `
+<div class="page-block" style="margin-left: ${a.standoffValues.indentation["number/natural"] + "rem"
+            }" data-miid="${xss(
+              /* hmm not an attr escape... */
+              a.miid
+            )}">
   <style>${a.css}</style>
   ${a.html}
   ${wrapCommentsHTML({
@@ -273,8 +275,8 @@ export const ProseMirrorBlockContainerHTML = PageWithTitle.forHTML(
       .map((comment) => renderCommentHTML(comment, slots.comments)),
   })}
 </div>`
-    )
-    .join("")}
+      )
+        .join("")}
   <div>
 </div>
 `,
@@ -297,9 +299,8 @@ function renderCommentHTML(
   <style>${comment.css}</style>
   <div class="page-comment--body" data-mount-target>${comment.html}</div>
   <div class="page-comment--meta">
-  <byline class="page-comment--poster">${
-    signer.split(":")[1] ?? signer
-  }</byline>&nbsp;
+  <byline class="page-comment--poster">${signer.split(":")[1] ?? signer
+    }</byline>&nbsp;
   <time class="page-comment--time">${moment(
     comment.standoffValues.postedAt["time/unix-secs"] * 1000
   ).fromNow()}</time>
@@ -316,7 +317,7 @@ function renderCommentHTML(
         )
         .map((reply) => renderCommentHTML(reply, allComments)),
     })
-  }
+    }
 </div>`;
 }
 
@@ -333,115 +334,62 @@ function wrapCommentsHTML(props: {
 }
 
 export const ProseMirrorBlockContainerWeb = PageWithTitle.forWeb(
-  ({ slots, values, save }) => {
-    // const domParser = DOMParser.fromSchema(schema);
-    // const domSerializer = DOMSerializer.fromSchema(schema);
-    let state = EditorState.create({
-      doc: schema.nodeFromJSON({
-        type: "doc",
-        attrs: {},
-        content: slots.children.map((child) =>
-          blockSpec.createNodeJSON({
-            miid: child.miid,
-            fract: child.standoffValues.fractionalIndex["number/decimal"],
-            indent: child.standoffValues.indentation["number/natural"],
-          })
-        ),
-      }),
-      schema,
-      plugins: [
-        history(),
-        dropCursor({
-          width: 3,
-          color: "cornflowerblue",
-        }),
-        keymap({ "Mod-z": undo, "Mod-y": redo }),
-        keymap(baseKeymap),
-        keymap({
-          "Mod-b": toggleMark(schema.marks.strong),
-          "Mod-i": toggleMark(schema.marks.em),
-        }),
-        keymap({
-          Enter: () => {
-            console.log("Handled enter");
-            return true;
-          },
-        }),
-        {
-          getState(state) {},
-          props: {},
-          spec: {
-            view(view) {
-              return {
-                update(view, prevState) {
-                  if (!view.state.doc.eq(prevState.doc)) {
-                    console.warn("TODO: Figure out which nodes were moved");
-                    // const frag = domSerializer.serializeFragment(
-                    //   view.state.doc.content
-                    // );
-                    // const html = Array.from(frag.children)
-                    //   .map((elt) => elt.outerHTML)
-                    //   .join("\n");
-                    // // console.log(frag, html);
-                    // save({
-                    //   title: {
-                    //     "text/html": "New title"
-                    //   }
-                    // });
-                  }
-                },
-              };
-            },
-          },
-        },
-      ],
-    });
+  ({slots, values, save}) => {
 
-    let view: EditorView;
+
+    function createMintterEditor(container: HTMLElement) {
+      const editorConfig = {
+        namespace: 'MintterEditorContainer',
+        theme: {
+        },
+        onError: console.error,
+        nodes: [
+          MintterBlock
+        ],
+      };
+
+      const editor = createEditor(editorConfig);
+
+      editor.update(() => {
+        let root = $getRoot()
+
+        slots.children.forEach(child => {
+          root.append($createMintterBlock({child, id: child.miid}))
+        })
+      })
+
+      // let removeListener = mergeRegister(
+      //   editor.registerCommand(INDENT_CONTENT_COMMAND, () => {
+      //     return false
+      //   }, COMMAND_PRIORITY_EDITOR)
+      // )
+
+      // editor.registerNodeTransform(MintterBlock, mintterBlockTransform)
+
+
+      let editorRoot = document.createElement('div')
+      editorRoot.id = 'editor-root'
+
+      editor.setRootElement(editorRoot)
+      container.append(editorRoot)
+
+      return editorRoot
+
+    }
 
     return {
-      // applyItemStandoff(values) {
-      //   console.warn(dev`TODO: update page standoff values for ${values}`);
-      // },
-      // override current value from save
       apply(values) {
-        console.warn("TODO: update page values from other source", { values });
-        if (values.title === undefined) return;
-        const frag = document.createElement("div");
-        frag.innerHTML = values.title["text/html"];
-        // const parsed = domParser.parse(frag);
-        // const { nodeSize } = view.state.tr.doc;
-
-        // TODO update directly to mountView
-
-        // direct full state replacement
-        // view.updateState(
-        //   view.state.apply(view.state.tr.replaceWith(0, nodeSize, parsed))
-        // );
+        console.log('IMPLEMENT apply()', values)
       },
-      mount({ container }) {
-        // console.log("mounting block container", mountTo);
-        const titleElt = document.createElement("h1");
-        titleElt.innerHTML = values.title["text/html"];
-        titleElt.contentEditable = "true";
-        container.append(titleElt);
-        const mountView = (view = new EditorView(container, {
-          state,
-          nodeViews: {
-            block: blockNodeView(slots),
-          },
-        }));
+      mount({container}) {
 
-        console.log("mounted container editor", container, mountView);
-        mountView.dom.classList.add("page-content");
-
+        let instance = createMintterEditor(container)
         return {
           destroy() {
-            mountView.destroy();
-            titleElt.remove();
+            instance.remove()
           },
-        };
-      },
-    };
+        }
+      }
+    }
   }
 );

@@ -45,6 +45,8 @@
   },
   "dependencies": {
     "@autoplay/utils": "^0.0.25",
+    "@lexical/utils": "^0.7.6",
+    "lexical": "^0.7.6",
     "librarylog": "^0.0.4",
     "moment": "^2.29.4",
     "prosemirror-dropcursor": "^1.6.1",
