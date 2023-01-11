@@ -1,77 +1,11 @@
+import {$getRoot, createEditor} from 'lexical';
 import {$createMintterBlock, MintterBlock} from './MintterBlock';
-import {baseKeymap, toggleMark} from "prosemirror-commands";
-import {dropCursor} from "prosemirror-dropcursor";
-import {history, redo, undo} from "prosemirror-history";
-import {keymap} from "prosemirror-keymap";
-import {Schema} from "prosemirror-model";
-import {EditorState} from "prosemirror-state";
-import type {EditorView, NodeViewConstructor} from "prosemirror-view";
-import {createEditor, DecoratorNode, NodeKey, LexicalNode, INDENT_CONTENT_COMMAND, OUTDENT_CONTENT_COMMAND, COMMAND_PRIORITY_EDITOR, $getRoot, $getNodeByKey} from 'lexical';
-
 import moment from "moment";
-
 import {dev, z} from "@autoplay/utils";
-import createLibraryLoggerProvider from "librarylog";
-import {schema as basicSchema} from "prosemirror-schema-basic";
-import {Subscription} from "rxjs";
 import xss from "xss";
 import {defineItemSchema} from "./defineItemSchema";
 import {defineMimeType} from "./MimeType";
-import {buildTypedNodeSpec} from "./prosemirrorBuildNodeSpec";
 import {textHTML} from "./textHTML.mimeType";
-import {mergeRegister} from "@lexical/utils";
-
-const blockSpec = buildTypedNodeSpec("block", {
-  atom: true,
-  selectable: true,
-  draggable: true,
-  isolating: true,
-  attrs: {
-    miid: {
-      // IDK
-      // specifying the type of this default will ensure that the typed spec will work
-      default: null as any as string,
-    },
-    indent: {
-      // IDK
-      // specifying the type of this default will ensure that the typed spec will work
-      default: 0,
-    },
-    /** fractional index */
-    fract: {
-      // specifying the type of this default will ensure that the typed spec will work
-      default: 0,
-    },
-  },
-})
-  .toDOM((node) => ["mintty-block", {"mintter-id": node.attrs.miid}])
-  // // Used for identifying pasting (this is not so important as we should manually manage pasting in Mintter
-  // // using unified -> https://github.com/unifiedjs/unified)
-  // .addParser({
-  //    ...
-  // })
-  .finish();
-
-/**
- * Minimal ProseMirror as a single line editor with marks from {@link import("prosemirror-schema-basic")}
- */
-const schema = new Schema({
-  nodes: {
-    doc: {
-      content: "block*",
-      // group: "block",
-      parseDOM: [{tag: "p"}],
-    },
-    block: blockSpec.nodeSpec,
-    // :: NodeSpec The text node.
-    // This shouldn't ever actually exist in the editor...
-    text: {
-      group: "inline",
-    },
-  },
-  // technically supports links
-  marks: basicSchema.spec.marks,
-});
 
 const decimalNumberFormat = defineMimeType("number/decimal", {
   parse(input) {
@@ -159,84 +93,6 @@ export const PageWithTitle = defineItemSchema({
   },
 });
 
-/** Take reference from {@link ProseMirrorBlockContainerHTML} */
-const blockNodeView: (
-  slots: typeof PageWithTitle["_slotWebTypes"]
-) => NodeViewConstructor = (slots) => (node, view, getPos, decs, innerDecs) => {
-  const attrs = blockSpec.attrs(node);
-  const dom = trashHTML(`<div class="page-block" data-miid="${xss(
-    /* hmm not an attr escape... 0/10? */
-    attrs.miid
-  )}">
-  </div>`);
-
-  const liblog = createLibraryLoggerProvider().getLogger();
-  const mountedSub = new Subscription();
-  const state = blockSpec.createState(
-    node,
-    liblog.downgrade.dev(),
-    mountedSub,
-    view,
-    getPos
-  );
-
-  mountedSub.add(
-    state.attrs$.indent.subscribe((value) => {
-      dom.style.marginLeft = `${value}rem`;
-    })
-  );
-
-  const found = slots.children.find((c) => c.miid === attrs.miid);
-  if (!found) {
-    console.error("missing slot info?", found);
-    dom.textContent = dev`missing slot info? ${attrs}`.toDisplay();
-    dom.style.whiteSpace = "pre";
-    return {dom};
-  }
-
-  if (!found.mount) debugger;
-
-  const mounted = found.mount({
-    container: dom,
-  });
-
-  dom.addEventListener("keydown", (event) => {
-    if (event.key === "Tab") {
-      console.warn(`TODO: Change indent of `, blockSpec.attrs(node));
-      state.dispatchUpdateAttrs((attrs) => ({
-        attrs: {
-          indent: Math.min(
-            6,
-            Math.max(0, event.shiftKey ? attrs.indent - 1 : attrs.indent + 1)
-          ),
-        },
-      }));
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }
-  });
-
-  return {
-    dom,
-    update(node, decorations, innerDecorations) {
-      return state.updateNode(node);
-    },
-    stopEvent(event) {
-      return event.target !== dom;
-    },
-    destroy() {
-      mounted.destroy();
-    },
-  };
-};
-
-/** this is stupid... just simple for vanilla js for now */
-function trashHTML(input: string): HTMLElement {
-  const host = document.createElement("div");
-  host.innerHTML = input;
-  return host.childNodes[0] as any;
-}
-
 export const ProseMirrorBlockContainerHTML = PageWithTitle.forHTML(
   ({slots, values}) => {
     slots.comments.map((child) => child.html);
@@ -259,10 +115,10 @@ export const ProseMirrorBlockContainerHTML = PageWithTitle.forHTML(
           (a) =>
               `
 <div class="page-block" style="margin-left: ${a.standoffValues.indentation["number/natural"] + "rem"
-            }" data-miid="${xss(
-              /* hmm not an attr escape... */
-              a.miid
-            )}">
+              }" data-miid="${xss(
+                /* hmm not an attr escape... */
+                a.miid
+              )}">
   <style>${a.css}</style>
   ${a.html}
   ${wrapCommentsHTML({
